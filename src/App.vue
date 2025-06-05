@@ -1,47 +1,41 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
-import TheWelcome from './components/TheWelcome.vue'
+import SideNavigation from './components/SideNavigation.vue'
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125" />
-
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
-    </div>
-  </header>
-
-  <main>
-    <TheWelcome />
-  </main>
+  <div class="app-container">
+    <SideNavigation />
+    <main class="main-content">
+      <h1>AI Agents Dashboard</h1>
+      <p>Welcome to your dashboard. Select an option from the side navigation.</p>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-header {
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  background-color: #f8fafc;
+}
+
+.main-content {
+  flex: 1;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #1A202C;
+  margin-bottom: 1rem;
+}
+
+p {
+  font-size: 1rem;
+  color: #4A5568;
   line-height: 1.5;
-}
-
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
 }
 </style>
