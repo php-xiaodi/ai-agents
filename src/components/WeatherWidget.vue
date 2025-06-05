@@ -9,6 +9,7 @@ interface WeatherData {
   humidity: number;
   windSpeed: number;
   feelsLike: number;
+  date: string;
 }
 
 const weatherData = ref<WeatherData | null>(null);
@@ -16,34 +17,32 @@ const loading = ref<boolean>(true);
 const error = ref<string | null>(null);
 const defaultCity = 'Shanghai';
 
-// OpenWeatherMap API key - 在实际应用中应该放在环境变量中
-const API_KEY = '4a8e9c0fbf8f9f7a0f8e9c0fbf8f9f7a'; // 这是一个示例key，需要替换为真实的API key
-
-const getWeatherByCoords = async (lat: number, lon: number) => {
-  try {
-    const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
-    );
-    
-    if (!response.ok) {
-      throw new Error('无法获取天气数据');
-    }
-    
-    const data = await response.json();
-    processWeatherData(data);
-  } catch (err) {
-    console.error('获取天气数据失败:', err);
-    error.value = '获取天气数据失败，请稍后再试';
-    loading.value = false;
-    // 失败时尝试获取默认城市的天气
-    getWeatherByCity(defaultCity);
-  }
+// 天气图标映射表
+const weatherIconMap: Record<string, string> = {
+  '晴': '01d',
+  '多云': '02d',
+  '阴': '03d',
+  '阵雨': '09d',
+  '雷阵雨': '11d',
+  '雨夹雪': '13d',
+  '小雨': '10d',
+  '中雨': '10d',
+  '大雨': '10d',
+  '暴雨': '10d',
+  '雪': '13d',
+  '小雪': '13d',
+  '中雪': '13d',
+  '大雪': '13d',
+  '雾': '50d',
+  '霾': '50d'
 };
 
+// 使用中华万年历天气API，无需API密钥
 const getWeatherByCity = async (city: string) => {
   try {
+    // 使用中华万年历天气API
     const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${API_KEY}&units=metric`
+      `https://wthrcdn.etouch.cn/weather_mini?city=${encodeURIComponent(city)}`
     );
     
     if (!response.ok) {
@@ -51,7 +50,11 @@ const getWeatherByCity = async (city: string) => {
     }
     
     const data = await response.json();
-    processWeatherData(data);
+    if (data.status === 1000) {
+      processWeatherData(data.data, city);
+    } else {
+      throw new Error(data.desc || `无法获取${city}的天气数据`);
+    }
   } catch (err) {
     console.error('获取天气数据失败:', err);
     error.value = `获取${city}的天气数据失败，请稍后再试`;
@@ -59,39 +62,59 @@ const getWeatherByCity = async (city: string) => {
   }
 };
 
-const processWeatherData = (data: any) => {
+const processWeatherData = (data: any, city: string) => {
+  // 处理中华万年历API返回的数据
+  const today = data.forecast[0];
+  const description = today.type;
+  
+  // 从高温低温字符串中提取数字
+  const highTemp = parseInt(today.high.replace(/[^0-9]/g, ''));
+  const lowTemp = parseInt(today.low.replace(/[^0-9]/g, ''));
+  const avgTemp = Math.round((highTemp + lowTemp) / 2);
+  
+  // 从风力字符串中提取风速
+  const windSpeed = today.fengli.replace(/[\[\]]/g, '');
+  
   weatherData.value = {
-    location: data.name,
-    temperature: Math.round(data.main.temp),
-    description: data.weather[0].description,
-    icon: data.weather[0].icon,
-    humidity: data.main.humidity,
-    windSpeed: data.wind.speed,
-    feelsLike: Math.round(data.main.feels_like)
+    location: city,
+    temperature: avgTemp,
+    description: description,
+    icon: getWeatherIconCode(description),
+    humidity: data.shidu ? parseInt(data.shidu.replace('%', '')) : 50, // 如果有湿度数据则使用，否则默认值
+    windSpeed: windSpeed,
+    feelsLike: avgTemp, // 中华万年历API没有体感温度，使用平均温度代替
+    date: today.date
   };
   loading.value = false;
 };
 
+// 根据天气描述获取对应的图标代码
+const getWeatherIconCode = (description: string): string => {
+  return weatherIconMap[description] || '01d'; // 默认晴天图标
+};
+
 onMounted(() => {
-  // 尝试获取用户位置
+  // 直接获取默认城市的天气
+  getWeatherByCity(defaultCity);
+  
+  // 尝试获取用户位置，但由于中华万年历API不支持经纬度查询，所以这里只是示意
+  // 实际应用中可以通过其他API将经纬度转换为城市名
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        getWeatherByCoords(position.coords.latitude, position.coords.longitude);
+        console.log('获取到用户位置:', position.coords.latitude, position.coords.longitude);
+        // 这里可以添加经纬度转城市名的逻辑，然后调用getWeatherByCity
+        // 由于简化处理，这里仍使用默认城市
       },
       (err) => {
         console.error('获取位置失败:', err);
         // 如果获取位置失败，使用默认城市
-        getWeatherByCity(defaultCity);
       }
     );
-  } else {
-    // 如果浏览器不支持地理位置，使用默认城市
-    getWeatherByCity(defaultCity);
   }
 });
 
-// 获取天气图标URL
+// 获取天气图标URL，仍使用OpenWeatherMap的图标
 const getWeatherIconUrl = (iconCode: string) => {
   return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
 };
@@ -112,7 +135,7 @@ const getWeatherIconUrl = (iconCode: string) => {
       <div v-else-if="weatherData" class="weather-content">
         <div class="weather-header">
           <h2>{{ weatherData.location }}</h2>
-          <div class="weather-date">{{ new Date().toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) }}</div>
+          <div class="weather-date">{{ weatherData.date }}</div>
         </div>
         
         <div class="weather-main">
@@ -138,8 +161,8 @@ const getWeatherIconUrl = (iconCode: string) => {
           </div>
           
           <div class="weather-detail-item">
-            <div class="detail-label">风速</div>
-            <div class="detail-value">{{ weatherData.windSpeed }} m/s</div>
+            <div class="detail-label">风力</div>
+            <div class="detail-value">{{ weatherData.windSpeed }}</div>
           </div>
         </div>
       </div>
