@@ -7,7 +7,7 @@ interface WeatherData {
   description: string;
   icon: string;
   humidity: number;
-  windSpeed: number;
+  windSpeed: string;
   feelsLike: number;
   date: string;
 }
@@ -15,9 +15,14 @@ interface WeatherData {
 const weatherData = ref<WeatherData | null>(null);
 const loading = ref<boolean>(true);
 const error = ref<string | null>(null);
-const defaultCity = 'Beijing'; // 默认城市改为北京
+const defaultCity = 'Beijing'; // 默认城市
+const defaultLocation = { latitude: 39.9093, longitude: 116.3964 }; // 北京的经纬度
 
-// 天气图标映射表
+// 百度地图API密钥 - 请替换为您自己的AK
+const BAIDU_MAP_AK = ''; // 请在百度地图开放平台申请：http://lbsyun.baidu.com/apiconsole/key
+const hasValidApiKey = BAIDU_MAP_AK.length > 0;
+
+// 天气图标映射表 - 适配百度天气API的天气类型
 const weatherIconMap: Record<string, string> = {
   '晴': '01d',
   '多云': '02d',
@@ -29,136 +34,191 @@ const weatherIconMap: Record<string, string> = {
   '中雨': '10d',
   '大雨': '10d',
   '暴雨': '10d',
-  '雪': '13d',
+  '大暴雨': '10d',
+  '特大暴雨': '10d',
+  '阵雪': '13d',
   '小雪': '13d',
   '中雪': '13d',
   '大雪': '13d',
+  '暴雪': '13d',
   '雾': '50d',
-  '霾': '50d'
+  '霾': '50d',
+  '沙尘暴': '50d',
+  '浮尘': '50d',
+  '扬沙': '50d',
+  '强沙尘暴': '50d'
 };
 
-// 使用中华万年历天气API，无需API密钥
-const getWeatherByCity = async (city: string) => {
+// 使用百度地图天气API获取天气数据
+const getWeatherByLocation = async (latitude: number, longitude: number) => {
   try {
-    // 使用中华万年历天气API
+    loading.value = true;
+    error.value = null;
+    
+    // 检查API密钥是否已设置
+    if (!hasValidApiKey) {
+      console.warn('未设置百度地图API密钥，使用模拟数据');
+      // 使用模拟数据
+      useMockWeatherData();
+      return;
+    }
+    
+    // 使用百度地图天气API
     const response = await fetch(
-      `https://wthrcdn.etouch.cn/weather_mini?city=${encodeURIComponent(city)}`
+      `https://api.map.baidu.com/weather/v1/?district_id=&data_type=all&ak=${BAIDU_MAP_AK}&location=${longitude},${latitude}`
     );
     
     if (!response.ok) {
-      throw new Error(`无法获取${city}的天气数据`);
+      throw new Error(`无法获取天气数据`);
     }
     
     const data = await response.json();
-    if (data.status === 1000) {
-      processWeatherData(data.data, city);
-    } else {
-      throw new Error(data.desc || `无法获取${city}的天气数据`);
+    
+    if (data.status !== 0) {
+      throw new Error(`获取天气数据失败: ${data.message || '未知错误'}`);
     }
+    
+    processWeatherData(data);
   } catch (err) {
     console.error('获取天气数据失败:', err);
-    error.value = `获取${city}的天气数据失败，请稍后再试`;
+    error.value = err instanceof Error ? err.message : '获取天气数据失败，请稍后再试';
     loading.value = false;
   }
 };
 
-const processWeatherData = (data: any, city: string) => {
-  // 处理中华万年历API返回的数据
-  const today = data.forecast[0];
-  const description = today.type;
-  
-  // 从高温低温字符串中提取数字
-  const highTemp = parseInt(today.high.replace(/[^0-9]/g, ''));
-  const lowTemp = parseInt(today.low.replace(/[^0-9]/g, ''));
-  const avgTemp = Math.round((highTemp + lowTemp) / 2);
-  
-  // 从风力字符串中提取风速
-  const windSpeed = today.fengli.replace(/[\[\]]/g, '');
-  
-  weatherData.value = {
-    location: city,
-    temperature: avgTemp,
-    description: description,
-    icon: getWeatherIconCode(description),
-    humidity: data.shidu ? parseInt(data.shidu.replace('%', '')) : 50, // 如果有湿度数据则使用，否则默认值
-    windSpeed: windSpeed,
-    feelsLike: avgTemp, // 中华万年历API没有体感温度，使用平均温度代替
-    date: today.date
-  };
+const processWeatherData = (data: any) => {
+  // 处理百度地图天气API返回的数据
+  try {
+    const result = data.result;
+    const now = result.now;
+    const location = result.location;
+    const forecast = result.forecasts[0]; // 获取今天的天气预报
+    const weatherType = now.text; // 天气类型，如：晴、多云等
+    const iconCode = getWeatherIconCode(weatherType);
+    
+    weatherData.value = {
+      location: location.city + location.name, // 城市名称
+      temperature: now.temp, // 当前温度
+      description: weatherType,
+      icon: iconCode,
+      humidity: now.rh, // 湿度
+      windSpeed: `${now.wind_dir} ${now.wind_class}`, // 风向和风力
+      feelsLike: now.feels_like, // 体感温度
+      date: forecast.date + ' ' + forecast.week // 日期和星期
+    };
+  } catch (err) {
+    console.error('处理天气数据失败:', err);
+    error.value = '处理天气数据失败，数据格式可能有变化';
+  }
   loading.value = false;
 };
 
 // 根据天气描述获取对应的图标代码
-const getWeatherIconCode = (description: string): string => {
-  return weatherIconMap[description] || '01d'; // 默认晴天图标
+const getWeatherIconCode = (weatherType: string): string => {
+  return weatherIconMap[weatherType] || '01d'; // 默认晴天图标
 };
 
-// 根据经纬度获取城市名称
-const getCityNameByLocation = async (latitude: number, longitude: number): Promise<string | null> => {
+// 使用模拟数据（当没有API密钥时）
+const useMockWeatherData = () => {
+  setTimeout(() => {
+    try {
+      // 模拟北京的天气数据
+      const mockData = {
+        location: {
+          city: '北京市',
+          name: '朝阳区'
+        },
+        now: {
+          temp: 25,
+          feels_like: 26,
+          rh: 40,
+          wind_dir: '东南风',
+          wind_class: '3级',
+          text: '晴'
+        },
+        forecasts: [
+          {
+            date: '2023-06-05',
+            week: '星期一',
+            high: 28,
+            low: 18
+          }
+        ]
+      };
+      
+      weatherData.value = {
+        location: mockData.location.city + mockData.location.name,
+        temperature: mockData.now.temp,
+        description: mockData.now.text,
+        icon: getWeatherIconCode(mockData.now.text),
+        humidity: mockData.now.rh,
+        windSpeed: `${mockData.now.wind_dir} ${mockData.now.wind_class}`,
+        feelsLike: mockData.now.feels_like,
+        date: mockData.forecasts[0].date + ' ' + mockData.forecasts[0].week
+      };
+    } catch (err) {
+      console.error('处理模拟数据失败:', err);
+      error.value = '处理模拟数据失败';
+    }
+    loading.value = false;
+  }, 1000); // 模拟网络延迟
+};
+
+// 刷新天气数据
+const refreshWeather = async () => {
   try {
-    // 注意：实际使用时需要申请腾讯位置服务API密钥
-    // 这里使用的是示例URL，实际使用时请替换为您的API密钥
-    const response = await fetch(
-      `https://apis.map.qq.com/ws/geocoder/v1/?location=${latitude},${longitude}&key=YOUR_KEY_HERE`
-    );
-    
-    if (!response.ok) {
-      throw new Error('无法获取位置信息');
+    // 检查API密钥是否已设置
+    if (!hasValidApiKey) {
+      console.warn('未设置百度地图API密钥，使用模拟数据');
+      loading.value = true;
+      error.value = null;
+      useMockWeatherData();
+      return;
     }
     
-    const data = await response.json();
-    if (data.status === 0) {
-      // 返回城市名称
-      return data.result.address_component.city.replace('市', '');
+    if (navigator.geolocation) {
+      loading.value = true;
+      error.value = null;
+      
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const { latitude, longitude } = position.coords;
+            console.log('获取到用户位置:', latitude, longitude);
+            
+            // 使用用户的位置获取天气
+            getWeatherByLocation(latitude, longitude);
+          } catch (err) {
+            console.error('处理位置信息失败:', err);
+            // 如果处理位置失败，使用默认位置
+            getWeatherByLocation(defaultLocation.latitude, defaultLocation.longitude);
+          }
+        },
+        (err) => {
+          console.error('获取位置失败:', err);
+          // 如果获取位置失败，使用默认位置
+          getWeatherByLocation(defaultLocation.latitude, defaultLocation.longitude);
+        },
+        { timeout: 10000, enableHighAccuracy: false } // 设置超时时间和精度
+      );
     } else {
-      throw new Error(data.message || '获取城市名称失败');
+      // 如果浏览器不支持地理位置，使用默认位置
+      console.log('浏览器不支持地理位置API，使用默认位置');
+      getWeatherByLocation(defaultLocation.latitude, defaultLocation.longitude);
     }
   } catch (err) {
-    console.error('获取城市名称失败:', err);
-    return null;
+    console.error('刷新天气数据失败:', err);
+    error.value = '刷新天气数据失败，请稍后再试';
+    loading.value = false;
   }
 };
 
 onMounted(() => {
-  // 尝试获取用户位置
-  if (navigator.geolocation) {
-    loading.value = true;
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          console.log('获取到用户位置:', latitude, longitude);
-          
-          // 尝试获取城市名称
-          const cityName = await getCityNameByLocation(latitude, longitude);
-          
-          if (cityName) {
-            console.log('获取到城市名称:', cityName);
-            getWeatherByCity(cityName);
-          } else {
-            console.log('无法获取城市名称，使用默认城市');
-            getWeatherByCity(defaultCity);
-          }
-        } catch (err) {
-          console.error('处理位置信息失败:', err);
-          getWeatherByCity(defaultCity);
-        }
-      },
-      (err) => {
-        console.error('获取位置失败:', err);
-        // 如果获取位置失败，使用默认城市
-        getWeatherByCity(defaultCity);
-      },
-      { timeout: 10000, enableHighAccuracy: false } // 设置超时时间和精度
-    );
-  } else {
-    // 如果浏览器不支持地理位置，使用默认城市
-    console.log('浏览器不支持地理位置API，使用默认城市');
-    getWeatherByCity(defaultCity);
-  }
+  // 初始化时获取天气数据
+  refreshWeather();
 });
 
-// 获取天气图标URL，仍使用OpenWeatherMap的图标
+// 获取天气图标URL，使用OpenWeatherMap的图标
 const getWeatherIconUrl = (iconCode: string) => {
   return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
 };
@@ -174,6 +234,7 @@ const getWeatherIconUrl = (iconCode: string) => {
       
       <div v-else-if="error" class="error">
         <p>{{ error }}</p>
+        <button @click="refreshWeather" class="refresh-button">重新获取</button>
       </div>
       
       <div v-else-if="weatherData" class="weather-content">
@@ -208,6 +269,12 @@ const getWeatherIconUrl = (iconCode: string) => {
             <div class="detail-label">风力</div>
             <div class="detail-value">{{ weatherData.windSpeed }}</div>
           </div>
+        </div>
+        
+        <div class="weather-footer">
+          <button @click="refreshWeather" class="refresh-button small">
+            <span class="refresh-icon">↻</span> 刷新
+          </button>
         </div>
       </div>
     </div>
@@ -257,6 +324,37 @@ const getWeatherIconUrl = (iconCode: string) => {
   text-align: center;
   padding: 24px;
   color: #ffcccc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 200px;
+  justify-content: center;
+}
+
+.refresh-button {
+  background-color: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 16px;
+  transition: background-color 0.3s;
+}
+
+.refresh-button:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.refresh-button.small {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+.refresh-icon {
+  display: inline-block;
+  margin-right: 4px;
 }
 
 .weather-header {
@@ -315,6 +413,7 @@ const getWeatherIconUrl = (iconCode: string) => {
   background-color: rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 16px;
+  margin-bottom: 16px;
 }
 
 .weather-detail-item {
@@ -330,6 +429,11 @@ const getWeatherIconUrl = (iconCode: string) => {
 .detail-value {
   font-size: 1.2rem;
   font-weight: 600;
+}
+
+.weather-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* 响应式设计 */
