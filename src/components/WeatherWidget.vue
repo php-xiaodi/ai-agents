@@ -15,7 +15,7 @@ interface WeatherData {
 const weatherData = ref<WeatherData | null>(null);
 const loading = ref<boolean>(true);
 const error = ref<string | null>(null);
-const defaultCity = 'Shanghai';
+const defaultCity = 'Beijing'; // 默认城市改为北京
 
 // 天气图标映射表
 const weatherIconMap: Record<string, string> = {
@@ -93,24 +93,68 @@ const getWeatherIconCode = (description: string): string => {
   return weatherIconMap[description] || '01d'; // 默认晴天图标
 };
 
+// 根据经纬度获取城市名称
+const getCityNameByLocation = async (latitude: number, longitude: number): Promise<string | null> => {
+  try {
+    // 注意：实际使用时需要申请腾讯位置服务API密钥
+    // 这里使用的是示例URL，实际使用时请替换为您的API密钥
+    const response = await fetch(
+      `https://apis.map.qq.com/ws/geocoder/v1/?location=${latitude},${longitude}&key=YOUR_KEY_HERE`
+    );
+    
+    if (!response.ok) {
+      throw new Error('无法获取位置信息');
+    }
+    
+    const data = await response.json();
+    if (data.status === 0) {
+      // 返回城市名称
+      return data.result.address_component.city.replace('市', '');
+    } else {
+      throw new Error(data.message || '获取城市名称失败');
+    }
+  } catch (err) {
+    console.error('获取城市名称失败:', err);
+    return null;
+  }
+};
+
 onMounted(() => {
-  // 直接获取默认城市的天气
-  getWeatherByCity(defaultCity);
-  
-  // 尝试获取用户位置，但由于中华万年历API不支持经纬度查询，所以这里只是示意
-  // 实际应用中可以通过其他API将经纬度转换为城市名
+  // 尝试获取用户位置
   if (navigator.geolocation) {
+    loading.value = true;
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        console.log('获取到用户位置:', position.coords.latitude, position.coords.longitude);
-        // 这里可以添加经纬度转城市名的逻辑，然后调用getWeatherByCity
-        // 由于简化处理，这里仍使用默认城市
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          console.log('获取到用户位置:', latitude, longitude);
+          
+          // 尝试获取城市名称
+          const cityName = await getCityNameByLocation(latitude, longitude);
+          
+          if (cityName) {
+            console.log('获取到城市名称:', cityName);
+            getWeatherByCity(cityName);
+          } else {
+            console.log('无法获取城市名称，使用默认城市');
+            getWeatherByCity(defaultCity);
+          }
+        } catch (err) {
+          console.error('处理位置信息失败:', err);
+          getWeatherByCity(defaultCity);
+        }
       },
       (err) => {
         console.error('获取位置失败:', err);
         // 如果获取位置失败，使用默认城市
-      }
+        getWeatherByCity(defaultCity);
+      },
+      { timeout: 10000, enableHighAccuracy: false } // 设置超时时间和精度
     );
+  } else {
+    // 如果浏览器不支持地理位置，使用默认城市
+    console.log('浏览器不支持地理位置API，使用默认城市');
+    getWeatherByCity(defaultCity);
   }
 });
 
